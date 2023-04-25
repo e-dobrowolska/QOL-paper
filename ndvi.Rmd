@@ -1,0 +1,211 @@
+---
+title: "Calculating NDVI index in Warsaw"
+output: html_document
+---
+
+The goal is to calculate NDVI index for Warsaw city for each cell separately and save each observation into a data frame, along with the cell's coordinates.
+
+### Step 1 - downloading Sentinel-2 data
+Log in on the [Scihub copernicus website](https://scihub.copernicus.eu/dhus/#/home) and mark your area of interest (in my case, Warsaw city):
+
+![](C:/Users/ewado/OneDrive/Dokumenty/Studia/R-mat/step1.png) 
+
+Use Advanced Search to filter observations with 0% of cloud cover:
+
+![](C:/Users/ewado/OneDrive/Dokumenty/Studia/R-mat/step12.png) 
+
+Click "search" and download observations you're interested in (in my case, one observation for lower-left tile, one for upper left tile and one for upper-right tile. Put together, they cover the whole Warsaw's area)
+
+![](C:/Users/ewado/OneDrive/Dokumenty/Studia/R-mat/plot13.png) 
+
+Open downloaded folder, and then GRANULE->(really long and senseless name of the folder)->IMG_DATA. There you will find some files with extensions .jp2. Copy those files to your working directory.
+
+![](C:/Users/ewado/OneDrive/Dokumenty/Studia/R-mat/Step14.png)
+
+### Step 2 - reading data into R and extracting the image of Warsaw from a tile (in my case, UDC tile was the first one)
+
+```{r message=FALSE, warning=FALSE}
+library(raster)
+library(dplyr)
+library(ggplot2)
+library(rgdal)
+library(sp)
+library(sf)
+library(tabularaster)
+library(ggplot2)
+setwd("C:/Users/ewado/OneDrive/Dokumenty/Studia/R-mat")
+
+# Reading Sentinel-2 data into a raster object
+satellite=stack("T34UDC_20220906T093601_B02_10m.jp2"," T34UDC_20220906T093601_B03_10m.jp2","T34UDC_20220906T093601_B04_10m.jp2","T34UDC_20220906T093601_B08_10m.jp2") 
+
+# Reading & extracting Warsaw area
+setwd("C:/Users/ewado/OneDrive/Dokumenty/Studia/R-mat")
+pow.sf <- st_read("powiaty.shp")
+pow.sf <- st_transform(pow.sf, crs = "+proj=longlat +datum=NAD83")
+waw.pow.sf<-pow.sf[pow.sf$jpt_nazwa_=='powiat Warszawa',]
+
+waw.pow.sf2<-st_transform(waw.pow.sf, crs(satellite)@projargs)
+waw.cropped<-crop(satellite, extent(waw.pow.sf2))
+waw.masked<-mask(waw.cropped, mask=waw.pow.sf2)
+ndvi<-(waw.masked[[4]]-waw.masked[[3]])/(waw.masked[[4]]+waw.masked[[3]])
+
+plot(waw.masked[[1]]) 
+plot(ndvi) 
+
+```
+
+### Step 3 - creating a data frame
+Create a spatial object using xyFromCell function (the function that returns coordinates of the center of the raster cell). I used xyFromCell(name_of_the_raster, spatial=TRUE, all_cells) and change it's projection. Then, save coordinates of this spatial object using a function coordinates():
+
+
+```{r}
+ndvi.crds<-spTransform(xyFromCell(ndvi, spatial=TRUE, 1:length(as.vector(ndvi))), CRS("+proj=longlat +datum=NAD83"))
+crds<-coordinates(ndvi.crds)
+
+class(crds)
+dim(crds)
+head(crds)
+```
+
+It looks nice, but it's a matrix, and we want a data frame:
+
+```{r}
+crds.df<-data.frame(ID=c(1:length(as.vector(ndvi))), X=crds[,1], Y=crds[,2])
+class(crds.df)
+dim(crds.df)
+head(crds.df)
+```
+The data frame of the coordinates is ready, now we need to add corresponding values of NDVI index:
+
+```{r}
+ndvi.values<-as.data.frame(ndvi)
+crds.df$NDVI<-ndvi.values[,1]
+head(crds.df)
+summary(crds.df)
+```
+
+As you can wee, it worked :)
+
+```{r}
+crds.df[100000:100010,]
+
+ggplot(crds.df, aes(x=X, y=Y, col=NDVI))+
+ geom_point()+
+ theme_minimal()
+
+```
+
+You can also remove observations with NA as ndvi index:
+
+```{r}
+dim(crds.df)
+crds.df<-crds.df[!is.na(crds.df$NDVI),]
+dim(crds.df)
+head(crds.df)
+
+ggplot(crds.df, aes(x=X, y=Y, col=NDVI))+
+  geom_point()+
+  theme_minimal()
+```
+
+### Step 4 - repeat steps 2&3 for the rest of the tiles and join data frames.
+
+##### UEC tile  
+
+```{r}
+
+satellite2=stack("C:/Users/ewado/OneDrive/Dokumenty/Studia/R-mat/T34UEC_20220827T093601_B02_10m.jp2",
+         "C:/Users/ewado/OneDrive/Dokumenty/Studia/R-mat/T34UEC_20220827T093601_B03_10m.jp2",
+         "C:/Users/ewado/OneDrive/Dokumenty/Studia/R-mat/T34UEC_20220827T093601_B04_10m.jp2",
+         "C:/Users/ewado/OneDrive/Dokumenty/Studia/R-mat/T34UEC_20220827T093601_B08_10m.jp2")
+
+waw.pow.sf2<-st_transform(waw.pow.sf, crs(satellite2)@projargs)
+waw.cropped<-crop(satellite2, extent(waw.pow.sf2))
+waw.masked<-mask(waw.cropped, mask=waw.pow.sf2)
+ndvi2<-(waw.masked[[4]]-waw.masked[[3]])/(waw.masked[[4]]+waw.masked[[3]])
+
+plot(waw.masked[[1]])
+plot(ndvi2)
+
+ndvi2.crds<-spTransform(xyFromCell(ndvi2, spatial=TRUE, 1:length(as.vector(ndvi2))), CRS("+proj=longlat +datum=NAD83"))
+crds2<-coordinates(ndvi2.crds)
+crds2.df<-data.frame(ID=c(1:length(as.vector(ndvi2))), X=crds2[,1], Y=crds2[,2])
+ndvi2.values<-as.data.frame(ndvi2)
+crds2.df$NDVI<-ndvi2.values[,1]
+head(crds2.df)
+
+crds2.df<-crds2.df[!is.na(crds2.df$NDVI),]
+
+ggplot(crds2.df, aes(x=X, y=Y, col=NDVI))+
+  geom_point()+
+  theme_minimal()
+```
+
+##### UDD tile
+
+```{r}
+
+satellite3=stack("C:/Users/ewado/OneDrive/Dokumenty/Studia/R-mat/T34UDD_20220701T095041_B02_10m.jp2",
+         "C:/Users/ewado/OneDrive/Dokumenty/Studia/R-mat/T34UDD_20220701T095041_B03_10m.jp2",
+         "C:/Users/ewado/OneDrive/Dokumenty/Studia/R-mat/T34UDD_20220701T095041_B04_10m.jp2",
+         "C:/Users/ewado/OneDrive/Dokumenty/Studia/R-mat/T34UDD_20220701T095041_B08_10m.jp2")
+
+waw.pow.sf2<-st_transform(waw.pow.sf, crs(satellite3)@projargs)
+waw.cropped<-crop(satellite3, extent(waw.pow.sf2))
+waw.masked<-mask(waw.cropped, mask=waw.pow.sf2)
+ndvi3<-(waw.masked[[4]]-waw.masked[[3]])/(waw.masked[[4]]+waw.masked[[3]])
+
+plot(waw.masked[[1]])
+plot(ndvi3)
+
+ndvi3.crds<-spTransform(xyFromCell(ndvi3, spatial=TRUE, 1:length(as.vector(ndvi3))), CRS("+proj=longlat +datum=NAD83"))
+crds3<-coordinates(ndvi3.crds)
+crds3.df<-data.frame(ID=c(1:length(as.vector(ndvi3))), X=crds3[,1], Y=crds3[,2])
+ndvi3.values<-as.data.frame(ndvi3)
+crds3.df$NDVI<-ndvi3.values[,1]
+head(crds3.df)
+
+crds3.df<-crds3.df[!is.na(crds3.df$NDVI),]
+
+ggplot(crds3.df, aes(x=X, y=Y, col=NDVI))+
+  geom_point()+
+  theme_minimal()
+
+```
+
+Merging data frames:
+
+```{r}
+df.ca<-rbind(crds.df, crds2.df, crds3.df)
+
+dim(df.ca)
+head(df.ca)
+
+ggplot(df.ca, aes(x=X, y=Y, col=NDVI))+
+  geom_point()+
+  theme_minimal()
+```
+
+You can save the data:
+```{r}
+#write.csv(df.ca, "ndvi_2023.csv")
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
